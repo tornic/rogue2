@@ -1,5 +1,6 @@
 import libtcodpy as libtcod
 import math
+import textwrap
  
 #actual size of the window
 SCREEN_WIDTH = 80
@@ -18,6 +19,9 @@ MAX_ROOMS = 30
 BAR_WIDTH = 20
 PANEL_HEIGHT = 7
 PANEL_Y = SCREEN_HEIGHT - PANEL_HEIGHT
+MSG_X = BAR_WIDTH + 2
+MSG_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
+MSG_HEIGHT = PANEL_HEIGHT - 1
  
  
 FOV_ALGO = 0  #default FOV algorithm
@@ -150,10 +154,10 @@ class Fighter:
  
         if damage > 0:
             #make the target take some damage
-            print self.owner.name.capitalize() + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points.'
+            message(self.owner.name.capitalize() + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points.')
             target.fighter.take_damage(damage)
         else:
-            print self.owner.name.capitalize() + ' attacks ' + target.name + ' but it has no effect!'
+            message(self.owner.name.capitalize() + ' attacks ' + target.name + ' but it has no effect!')
 
 class BasicMonster:
     #AI for a basic monster.
@@ -173,7 +177,7 @@ class BasicMonster:
 def player_death(player):
     #the game ended!
     global game_state
-    print 'You died!'
+    message('You died!', libtcod.red)
     game_state = 'dead'
  
     #for added effect, transform the player into a corpse!
@@ -183,7 +187,7 @@ def player_death(player):
 def monster_death(monster):
     #transform it into a nasty corpse! it doesn't block, can't be
     #attacked and doesn't move
-    print monster.name.capitalize() + ' is dead!'
+    message(monster.name.capitalize() + ' is dead!', libtcod.orange)
     monster.char = '%'
     monster.color = libtcod.dark_red
     monster.blocks = False
@@ -202,8 +206,6 @@ def is_blocked(x, y):
         if object.blocks and object.x == x and object.y == y:
             return True
     return False
-
-
 
 def create_room(room):
     global map
@@ -227,6 +229,34 @@ def create_v_tunnel(y1, y2, x):
         map[x][y].blocked = False
         map[x][y].block_sight = False
  
+def place_objects(room):
+    #choose random number of monsters
+    num_monsters = libtcod.random_get_int(0, 0, MAX_ROOM_MONSTERS)
+ 
+    for i in range(num_monsters):
+        #choose random spot for this monster
+        x = libtcod.random_get_int(0, room.x1, room.x2)
+        y = libtcod.random_get_int(0, room.y1, room.y2)
+ 
+        #only place it if the tile is not blocked
+        if not is_blocked(x, y):
+            if libtcod.random_get_int(0, 0, 100) < 80:  #80% chance of getting an orc
+                #create an orc
+                fighter_component = Fighter(hp=10, defense=0, power=3, death_function=monster_death)
+                ai_component = BasicMonster()
+ 
+                monster = Object(x, y, 'o', 'orc', libtcod.desaturated_green,
+                    blocks=True, fighter=fighter_component, ai=ai_component)
+            else:
+                #create a troll
+                fighter_component = Fighter(hp=16, defense=1, power=4, death_function=monster_death)
+                ai_component = BasicMonster()
+ 
+                monster = Object(x, y, 'T', 'troll', libtcod.darker_green,
+                    blocks=True, fighter=fighter_component, ai=ai_component)
+ 
+            objects.append(monster)
+
 def make_map():
     global map, player
  
@@ -293,34 +323,6 @@ def make_map():
             rooms.append(new_room)
             num_rooms += 1
 
-def place_objects(room):
-    #choose random number of monsters
-    num_monsters = libtcod.random_get_int(0, 0, MAX_ROOM_MONSTERS)
- 
-    for i in range(num_monsters):
-        #choose random spot for this monster
-        x = libtcod.random_get_int(0, room.x1, room.x2)
-        y = libtcod.random_get_int(0, room.y1, room.y2)
- 
-        #only place it if the tile is not blocked
-        if not is_blocked(x, y):
-            if libtcod.random_get_int(0, 0, 100) < 80:  #80% chance of getting an orc
-                #create an orc
-                fighter_component = Fighter(hp=10, defense=0, power=3, death_function=monster_death)
-                ai_component = BasicMonster()
- 
-                monster = Object(x, y, 'o', 'orc', libtcod.desaturated_green,
-                    blocks=True, fighter=fighter_component, ai=ai_component)
-            else:
-                #create a troll
-                fighter_component = Fighter(hp=16, defense=1, power=4, death_function=monster_death)
-                ai_component = BasicMonster()
- 
-                monster = Object(x, y, 'T', 'troll', libtcod.darker_green,
-                    blocks=True, fighter=fighter_component, ai=ai_component)
- 
-            objects.append(monster)
-
 def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
     #render a bar (HP, experience, etc). first calculate the width of the bar
     bar_width = int(float(value) / maximum * total_width)
@@ -384,6 +386,13 @@ def render_all():
     #prepare to render the GUI panel
     libtcod.console_set_default_background(panel, libtcod.black)
     libtcod.console_clear(panel)
+
+    #print the game messages, one line at a time
+    y = 1
+    for (line, color) in game_msgs:
+        libtcod.console_set_default_foreground(panel, color)
+        libtcod.console_print_ex(panel, MSG_X, y, libtcod.BKGND_NONE, libtcod.LEFT, line)
+        y += 1
  
     #show the player's stats
     render_bar(1, 1, BAR_WIDTH, 'HP', player.fighter.hp, player.fighter.max_hp,
@@ -449,6 +458,18 @@ def handle_keys():
         else:
             return 'didnt-take-turn'
 
+def message(new_msg, color = libtcod.white):
+    #split the message if necessary, among multiple lines
+    new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
+ 
+    for line in new_msg_lines:
+        #if the buffer is full, remove the first line to make room for the new one
+        if len(game_msgs) == MSG_HEIGHT:
+            del game_msgs[0]
+ 
+        #add the new line as a tuple, with the text and the color
+        game_msgs.append( (line, color) )
+
 
 
 
@@ -482,6 +503,12 @@ for y in range(MAP_HEIGHT):
 fov_recompute = True
 game_state = 'playing'
 player_action = None
+
+#create the list of game messages and their colors, starts empty
+game_msgs = []
+
+#a warm welcoming message!
+message('Welcome stranger! Prepare to perish in the Tombs of the Ancient Kings.', libtcod.red)
 
 while not libtcod.console_is_window_closed():
 

@@ -192,7 +192,7 @@ class Fighter:
     def max_hp(self):  #return actual max_hp, by summing up the bonuses from all equipped items
         bonus = sum(equipment.max_hp_bonus for equipment in get_all_equipped(self.owner))
         return self.base_max_hp + bonus
- 
+
     def attack(self, target):
         #a simple formula for attack damage
         damage = self.power - target.fighter.defense
@@ -223,6 +223,62 @@ class Fighter:
         self.hp += amount
         if self.hp > self.max_hp:
             self.hp = self.max_hp
+
+class Bowmen:
+    #combat-related properties and methods (monster, player, NPC).
+    def __init__(self, hp, defense, power, xp, death_function=None):
+        self.base_max_hp = hp
+        self.hp = hp
+        self.base_defense = defense
+        self.base_power = power
+        self.xp = xp
+        self.death_function = death_function
+ 
+    @property
+    def power(self):  #return actual power, by summing up the bonuses from all equipped items
+        bonus = sum(equipment.power_bonus for equipment in get_all_equipped(self.owner))
+        return self.base_power + bonus
+ 
+    @property
+    def defense(self):  #return actual defense, by summing up the bonuses from all equipped items
+        bonus = sum(equipment.defense_bonus for equipment in get_all_equipped(self.owner))
+        return self.base_defense + bonus
+ 
+    @property
+    def max_hp(self):  #return actual max_hp, by summing up the bonuses from all equipped items
+        bonus = sum(equipment.max_hp_bonus for equipment in get_all_equipped(self.owner))
+        return self.base_max_hp + bonus
+
+    def attack(self, target):
+        #a simple formula for attack damage
+        damage = self.power - target.fighter.defense
+ 
+        if damage > 0:
+            #make the target take some damage
+            message(self.owner.name.capitalize() + ' shoots an arrow at ' + target.name + ' for ' + str(damage) + ' hit points.')
+            target.fighter.take_damage(damage)
+        else:
+            message(self.owner.name.capitalize() + ' shoots an arrow at ' + target.name + ' but it misses!')
+ 
+    def take_damage(self, damage):
+        #apply damage if possible
+        if damage > 0:
+            self.hp -= damage
+ 
+            #check for death. if there's a death function, call it
+            if self.hp <= 0:
+                function = self.death_function
+                if function is not None:
+                    function(self.owner)
+ 
+                if self.owner != player:  #yield experience to the player
+                    player.fighter.xp += self.xp
+ 
+    def heal(self, amount):
+        #heal by the given amount, without going over the maximum
+        self.hp += amount
+        if self.hp > self.max_hp:
+            self.hp = self.max_hp
  
 class BasicMonster:
     #AI for a basic monster.
@@ -233,6 +289,21 @@ class BasicMonster:
  
             #move towards player if far away
             if monster.distance_to(player) >= 2:
+                monster.move_towards(player.x, player.y)
+ 
+            #close enough, attack! (if the player is still alive.)
+            elif player.fighter.hp > 0:
+                monster.fighter.attack(player)
+
+class RangeMonster:
+    #AI for a range monster.
+    def take_turn(self):
+        #a range monster takes its turn. if you can see it, it can see you
+        monster = self.owner
+        if libtcod.map_is_in_fov(fov_map, monster.x, monster.y):
+ 
+            #move towards player if far away
+            if monster.distance_to(player) > 3:
                 monster.move_towards(player.x, player.y)
  
             #close enough, attack! (if the player is still alive.)
@@ -496,6 +567,7 @@ def place_objects(room):
     monster_chances = {}
     monster_chances['orc'] = 80  #orc always shows up, even if all other monsters have 0 chance
     monster_chances['troll'] = from_dungeon_level([[15, 3], [30, 5], [60, 7]])
+    monster_chances['orc bowmen'] = 20
  
     #maximum number of items per room
     max_items = from_dungeon_level([[1, 1], [2, 4]])
@@ -535,6 +607,14 @@ def place_objects(room):
                 ai_component = BasicMonster()
  
                 monster = Object(x, y, 'T', 'troll', libtcod.darker_green,
+                                 blocks=True, fighter=fighter_component, ai=ai_component)
+
+            elif choice == 'orc bowmen':
+                #create a troll
+                fighter_component = Bowmen(hp=15, defense=0, power=3, xp=40, death_function=monster_death)
+                ai_component = RangeMonster()
+ 
+                monster = Object(x, y, 'o', 'orc bowmen', libtcod.light_green,
                                  blocks=True, fighter=fighter_component, ai=ai_component)
  
             objects.append(monster)
